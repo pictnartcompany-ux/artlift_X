@@ -2,8 +2,7 @@ name: ArtLift Bot (Playwright)
 
 on:
   schedule:
-    # 15 exécutions/jour : 05:05–19:05 UTC = 07:05–21:05 Bruxelles (CEST)
-    - cron: "5 5-19 * * *"
+    - cron: "5 5-19 * * *"   # 15/jour
   workflow_dispatch:
 
 concurrency:
@@ -13,7 +12,9 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright  # emplacement stable du cache
     steps:
       - uses: actions/checkout@v4
 
@@ -21,18 +22,38 @@ jobs:
         with:
           python-version: "3.11"
 
-      # (optionnel mais utile) Cache le navigateur Playwright entre les runs
+      # Installe d'abord Playwright (lib Python) pour lire sa version
+      - name: Install Python deps (libs)
+        run: |
+          pip install -r requirements.txt
+          python -c "import playwright; print('Playwright Py version:', playwright.__version__)"
+
+      # Cache navigateurs Playwright, clé liée à l'OS + version Playwright Python
+      - name: Get Playwright version
+        id: pwv
+        run: |
+          echo "version=$(python - <<'PY'\nimport playwright; print(playwright.__version__)\nPY)" >> $GITHUB_OUTPUT
+
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-firefox
-          restore-keys: playwright-
+          key: pw-browsers-${{ runner.os }}-${{ steps.pwv.outputs.version }}-chromium
+          restore-keys: |
+            pw-browsers-${{ runner.os }}-${{ steps.pwv.outputs.version }}-
+            pw-browsers-${{ runner.os }}-
 
-      - name: Install Python deps
+      # Installe Chromium (si pas présent dans le cache)
+      - name: Install Playwright browsers (chromium)
         run: |
-          pip install -r requirements.txt
-          python -m playwright install --with-deps firefox
+          python -m playwright install --with-deps chromium
+          # Sanity check: affiche les binaires présents
+          python - <<'PY'
+import os, glob
+root=os.path.expanduser('~/.cache/ms-playwright')
+print('Browsers in cache:', os.listdir(root) if os.path.isdir(root) else 'NONE')
+print('Chromium headless_shell:', glob.glob(root+'/**/chrome-linux/*headless*', recursive=True))
+PY
 
       - name: Anti-burst jitter
         run: sleep $((RANDOM % 600))  # 0–10 min
@@ -41,10 +62,10 @@ jobs:
         env:
           X_USERNAME: ${{ secrets.X_USERNAME }}
           X_PASSWORD: ${{ secrets.X_PASSWORD }}
+          PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
         run: python main.py
 
-      # === DEBUG: récupère les captures *.png générées par main.py ===
-      # Retire ce bloc quand tout est stable
+      # Debug artefacts (screenshots + trace si ton script les crée)
       - name: Upload screenshots (debug)
         if: always()
         uses: actions/upload-artifact@v4
@@ -52,3 +73,10 @@ jobs:
           name: debug-screens
           path: |
             *.png
+
+      - name: Upload Playwright trace (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: trace.zip
