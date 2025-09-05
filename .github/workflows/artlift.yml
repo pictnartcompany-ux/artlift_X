@@ -13,13 +13,21 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # (optionnel mais utile) Cache le navigateur Playwright entre les runs
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-firefox
+          restore-keys: playwright-
 
       - name: Install Python deps
         run: |
@@ -34,3 +42,13 @@ jobs:
           X_USERNAME: ${{ secrets.X_USERNAME }}
           X_PASSWORD: ${{ secrets.X_PASSWORD }}
         run: python main.py
+
+      # === DEBUG: récupère les captures *.png générées par main.py ===
+      # Retire ce bloc quand tout est stable
+      - name: Upload screenshots (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screens
+          path: |
+            *.png
