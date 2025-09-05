@@ -1,101 +1,129 @@
-import os, random, tweepy
+import os, random, time
 from datetime import datetime
 from dateutil import tz
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-# --- Auth X ---
-client = tweepy.Client(
-    consumer_key=os.getenv("TWITTER_API_KEY"),
-    consumer_secret=os.getenv("TWITTER_API_SECRET"),
-    access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
-    access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
-    wait_on_rate_limit=True,
-)
+USERNAME = os.getenv("X_USERNAME")  # email/username
+PASSWORD = os.getenv("X_PASSWORD")  # mot de passe
 
-# --- Listes de sources (à compléter) ---
-artists_nft = ["@artistNFT1", "@artistNFT2", "@artistNFT3"]
-artists_non_nft = ["@artist1", "@artist2", "@artist3"]
-loufis_handles = ["@loufisart"]  # tu peux ajouter d'autres fils liés si tu veux
-
-pictnart_promos = [
+# Listes (à personnaliser)
+ARTISTS_NFT = ["artistNFT1", "artistNFT2"]
+ARTISTS_NONNFT = ["artist1", "artist2"]
+PICTNART_PROMOS = [
     "Discover our partner Pictnart for creative support and artistic growth 👉 https://pictnartcompany-ux.github.io/grow_your_craft/",
     "Looking for motivation in your art journey? 🌟 Check out our partner Pictnart 👉 https://pictnartcompany-ux.github.io/grow_your_craft/",
     "Elevate your craft with the help of our partner Pictnart 🎨 👉 https://pictnartcompany-ux.github.io/grow_your_craft/",
 ]
 
-# --- Paramètres de répartition ---
-# 70% artistes / 30% loufisart ; ~0.25% de chances par run pour un post promo (~2–3/mois à 465 runs)
-P_ARTISTS = 0.70
-P_PROMO = 0.0025  # très faible, mais suffisant sur le mois
+P_ARTISTS = 0.70   # 70% retweets d'artistes
+P_PROMO   = 0.0025 # ~2–3 promos/mois sur 465 runs
+RANDOM_WAIT = (2.0, 5.0)  # petites pauses humaines
 
-def pick_rt_from(handle: str):
-    u = client.get_user(username=handle.replace("@",""), user_fields=["id"])
-    if not u or not u.data:
-        return None
-    tweets = client.get_users_tweets(u.data.id, max_results=5, exclude=["replies"])
-    if not tweets or not tweets.data:
-        return None
-    return tweets.data[0].id
+def human_pause(a=RANDOM_WAIT[0], b=RANDOM_WAIT[1]):
+    time.sleep(random.uniform(a, b))
 
-def do_retweet_from_list(handles):
-    random.shuffle(handles)
-    for h in handles:
-        tid = pick_rt_from(h)
-        if tid:
-            client.retweet(tid)
-            print(f"Retweeted latest from {h} (id {tid})")
-            return True
-    print("No tweet found to retweet from provided list.")
-    return False
+def login(page):
+    page.goto("https://x.com/login", wait_until="domcontentloaded")
+    page.wait_for_selector('input[name="text"]', timeout=20000)
+    page.fill('input[name="text"]', USERNAME)
+    human_pause()
+    page.click('div[role="button"]:has-text("Next"), div[role="button"]:has-text("Suivant")')
 
-def post_pictnart_promo():
-    text = random.choice(pictnart_promos)
-    client.create_tweet(text=text)
-    print("Posted Pictnart promo.")
+    # Étape intermédiaire possible: X demande email/tél/username à nouveau
+    try:
+        page.wait_for_selector('input[name="text"]', timeout=5000)
+        # si un second champ texte réapparaît, on remet l’USERNAME
+        if page.is_visible('input[name="text"]'):
+            page.fill('input[name="text"]', USERNAME)
+            human_pause()
+            page.click('div[role="button"]:has-text("Next"), div[role="button"]:has-text("Suivant")')
+    except PWTimeout:
+        pass
 
-def post_loufis():
-    # RT @loufisart prioritaire, sinon un petit post texte
-    if not do_retweet_from_list(loufis_handles):
-        alt = "A new piece from @loufisart — dive into the world of Loufi’s Art ✨"
-        client.create_tweet(text=alt)
-        print("Fallback Loufi’s text post.")
+    page.wait_for_selector('input[name="password"]', timeout=20000)
+    page.fill('input[name="password"]', PASSWORD)
+    human_pause()
+    page.click('div[role="button"]:has-text("Log in"), div[role="button"]:has-text("Se connecter")')
 
-def post_artists():
-    # 50/50 NFT vs non-NFT
-    if random.random() < 0.5:
-        ok = do_retweet_from_list(artists_nft)
+    # Attendre que la timeline ou le bouton "Post" soit présent
+    page.wait_for_selector('div[aria-label="Post"], div[data-testid="tweetTextarea_0"]', timeout=30000)
+
+def post_text(page, text):
+    # Ouvrir la boîte de post
+    if page.is_visible('div[aria-label="Post"]'):
+        page.click('div[aria-label="Post"]')
     else:
-        ok = do_retweet_from_list(artists_non_nft)
-    if not ok:
-        # fallback small curation message (rare)
-        client.create_tweet(text="Discover inspiring art today ✨ #art #inspiration")
-        print("Fallback artist text post.")
+        page.click('div[data-testid="tweetTextarea_0"]')
+    human_pause()
+    # Zone de texte
+    page.fill('div[aria-label="Post text"], div[role="textbox"][data-testid="tweetTextarea_0"]', text)
+    human_pause()
+    # Bouton "Tweet"
+    page.click('div[data-testid="tweetButtonInline"]')
+    # Attendre un petit signe que c'est parti (pas toujours fiable, mais ok)
+    human_pause(3, 6)
 
-def within_daily_cap():
-    """
-    On déclenche 15 fois/jour par cron → cap naturel = 15 posts/jour.
-    On ajoute juste une sécurité: on vérifie l’heure locale Bruxelles
-    et on n’autorise qu’un post par exécution (1 run = 1 post).
-    """
-    return True  # cap géré par le planning (15 runs/jour)
+def retweet_latest(page, handle):
+    # handle sans '@'
+    h = handle.lstrip("@")
+    page.goto(f"https://x.com/{h}", wait_until="domcontentloaded")
+    # attendre un tweet
+    page.wait_for_selector('article div[data-testid="retweet"]', timeout=20000)
+    human_pause()
+    # cliquer sur le premier retweet dispo
+    page.click('article div[data-testid="retweet"]', delay=random.randint(50,120))
+    human_pause()
+    # confirmer "Retweet"
+    page.click('div[role="menuitem"]:has-text("Retweet")')
+    human_pause(2,4)
+
+def post_pictnart_promo(page):
+    post_text(page, random.choice(PICTNART_PROMOS))
+
+def post_loufis(page):
+    # soit retweet d'@loufisart (si accessible), soit fallback texte
+    try:
+        retweet_latest(page, "loufisart")
+    except Exception as e:
+        post_text(page, "A new piece from @loufisart — dive into the world of Loufi’s Art ✨")
+
+def post_artists(page):
+    lst = ARTISTS_NFT if random.random() < 0.5 else ARTISTS_NONNFT
+    random.shuffle(lst)
+    for h in lst:
+        try:
+            retweet_latest(page, h)
+            return
+        except Exception:
+            continue
+    # fallback léger si aucun RT possible
+    post_text(page, "Discover inspiring art today ✨ #art #inspiration")
 
 def main():
-    # Fuseau Europe/Brussels pour logs
+    # Logs horodatés Europe/Brussels
     brussels = tz.gettz("Europe/Brussels")
     now = datetime.utcnow().replace(tzinfo=tz.UTC).astimezone(brussels)
-    print(f"Run at {now.isoformat()}")
+    print(f"[ArtLift] Run at {now.isoformat()}")
 
-    if not within_daily_cap():
-        print("Daily cap reached, skipping.")
-        return
+    if not USERNAME or not PASSWORD:
+        raise RuntimeError("Missing X_USERNAME or X_PASSWORD env vars.")
 
-    # Choix du type de post
-    roll = random.random()
-    if roll < P_PROMO:
-        post_pictnart_promo()
-    elif roll < P_PROMO + P_ARTISTS:
-        post_artists()
-    else:
-        post_loufis()
+    with sync_playwright() as p:
+        browser = p.firefox.launch(headless=True)
+        context = browser.new_context(locale="en-US", user_agent=None)
+        page = context.new_page()
+
+        login(page)
+
+        roll = random.random()
+        if roll < P_PROMO:
+            post_pictnart_promo(page)
+        elif roll < P_PROMO + P_ARTISTS:
+            post_artists(page)
+        else:
+            post_loufis(page)
+
+        browser.close()
 
 if __name__ == "__main__":
     main()
