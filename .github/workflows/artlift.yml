@@ -1,8 +1,8 @@
-name: ArtLift Bot
+name: ArtLift Bot (Playwright)
 
 on:
   schedule:
-    # GitHub cron est en UTC. Ici: 05 à 19 UTC = 07:00→21:00 heure de Bruxelles (CEST, UTC+2).
+    # 15 exécutions/jour : 05:05–19:05 UTC = 07:05–21:05 Bruxelles (CEST)
     - cron: "5 5-19 * * *"
   workflow_dispatch:
 
@@ -11,28 +11,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  post:
-    runs-on: ubuntu-latest  # Linux = minutes gratuites en public, 1× en privé
-    timeout-minutes: 5
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: pip install -r requirements.txt
+      - name: Install Python deps
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps firefox
 
-      - name: Jitter (anti-rafale)
-        run: sleep $((RANDOM % 600))  # 0–10 minutes
+      - name: Anti-burst jitter
+        run: sleep $((RANDOM % 600))  # 0–10 min
 
-      - name: Run bot
+      - name: Post
         env:
-          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
-          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
-          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
-          TWITTER_ACCESS_SECRET: ${{ secrets.TWITTER_ACCESS_SECRET }}
+          X_USERNAME: ${{ secrets.X_USERNAME }}
+          X_PASSWORD: ${{ secrets.X_PASSWORD }}
         run: python main.py
