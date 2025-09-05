@@ -231,8 +231,21 @@ def main():
         sys.exit(1)
 
     with sync_playwright() as p:
-        # Chromium (plus stable en CI) + traces
-        browser = p.chromium.launch(headless=True)
+        # --- lancement Chromium avec auto-install si besoin ---
+        def launch_chromium():
+            return p.chromium.launch(headless=True)
+
+        try:
+            browser = launch_chromium()
+        except Exception as e:
+            print(f"[WARN] Chromium not found, installing… ({e})")
+            import subprocess
+            subprocess.run(
+                ["python", "-m", "playwright", "install", "chromium", "--with-deps"],
+                check=False
+            )
+            browser = launch_chromium()
+
         context_kwargs = dict(
             locale="fr-FR",
             timezone_id="Europe/Brussels",
