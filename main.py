@@ -23,30 +23,55 @@ def human_pause(a=RANDOM_WAIT[0], b=RANDOM_WAIT[1]):
     time.sleep(random.uniform(a, b))
 
 def login(page):
-    page.goto("https://x.com/login", wait_until="domcontentloaded")
-    page.wait_for_selector('input[name="text"]', timeout=20000)
-    page.fill('input[name="text"]', USERNAME)
-    human_pause()
-    page.click('div[role="button"]:has-text("Next"), div[role="button"]:has-text("Suivant")')
+    # 1) Aller sur le bon flow de login (plus stable que /login)
+    page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded")
 
-    # Étape intermédiaire possible: X demande email/tél/username à nouveau
+    # 2) Champ "Phone, email, or username"
+    page.wait_for_selector('input[name="text"]', timeout=30000)
+    page.fill('input[name="text"]', USERNAME)
+    time.sleep(random.uniform(0.6, 1.2))
+
+    # Eviter le bouton "Next" (instable) → on presse Enter
+    page.keyboard.press("Enter")
+
+    # 3) Parfois X redemande encore un identifiant (challenge)
     try:
-        page.wait_for_selector('input[name="text"]', timeout=5000)
-        # si un second champ texte réapparaît, on remet l’USERNAME
+        page.wait_for_selector('input[name="text"]', timeout=4000)
         if page.is_visible('input[name="text"]'):
             page.fill('input[name="text"]', USERNAME)
-            human_pause()
-            page.click('div[role="button"]:has-text("Next"), div[role="button"]:has-text("Suivant")')
-    except PWTimeout:
+            time.sleep(random.uniform(0.4, 0.9))
+            page.keyboard.press("Enter")
+    except:
         pass
 
-    page.wait_for_selector('input[name="password"]', timeout=20000)
+    # 4) Attendre le champ mot de passe
+    page.wait_for_selector('input[name="password"]', timeout=30000)
     page.fill('input[name="password"]', PASSWORD)
-    human_pause()
-    page.click('div[role="button"]:has-text("Log in"), div[role="button"]:has-text("Se connecter")')
+    time.sleep(random.uniform(0.6, 1.2))
 
-    # Attendre que la timeline ou le bouton "Post" soit présent
-    page.wait_for_selector('div[aria-label="Post"], div[data-testid="tweetTextarea_0"]', timeout=30000)
+    # 5) Soumission : Enter d'abord (plus fiable),
+    #    sinon fallback sur différents sélecteurs possibles
+    try:
+        page.keyboard.press("Enter")
+    except:
+        pass
+
+    # petit back-off pour laisser le temps au submit
+    time.sleep(random.uniform(0.8, 1.6))
+
+    # Fallback si Enter n'a pas suffi
+    if page.is_visible('div[data-testid="LoginForm_Login_Button"]'):
+        page.click('div[data-testid="LoginForm_Login_Button"]')
+    elif page.is_visible('div[role="button"]:has-text("Log in")'):
+        page.click('div[role="button"]:has-text("Log in")')
+    elif page.is_visible('div[role="button"]:has-text("Se connecter")'):
+        page.click('div[role="button"]:has-text("Se connecter")')
+
+    # 6) Attendre que l'éditeur de post/la timeline soit chargée
+    page.wait_for_selector(
+        'div[aria-label="Post"], div[data-testid="tweetTextarea_0"], div[role="textbox"]',
+        timeout=30000
+    )
 
 def post_text(page, text):
     # Ouvrir la boîte de post
