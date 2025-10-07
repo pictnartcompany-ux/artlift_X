@@ -16,9 +16,14 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - uses: actions/checkout@v4
+
+      - name: List repo files (sanity)
+        run: |
+          pwd
+          ls -la
+          ls -la scripts || true
 
       - uses: actions/setup-python@v5
         with:
@@ -29,11 +34,21 @@ jobs:
           pip install -r requirements.txt
 
       - name: Anti-burst jitter
-        run: sleep $((RANDOM % 300))  # 0–5 min
+        run: sleep $((RANDOM % 300))
 
+      # A) si main_bsky.py est à la racine :
       - name: Run ArtLift Bluesky
+        if: ${{ hashFiles('main_bsky.py') != '' }}
         env:
           BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
           BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
-          # MODE: evening_posts   # <- si tu veux forcer manuellement pendant des tests
+        run: python main_bsky.py
+
+      # B) si ton script est dans scripts/
+      - name: Run ArtLift Bluesky (scripts/)
+        if: ${{ hashFiles('scripts/main_bsky.py') != '' }}
+        working-directory: scripts
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
         run: python main_bsky.py
