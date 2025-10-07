@@ -1,2 +1,2 @@
-playwright>=1.46.0
+atproto>=0.0.48
 python-dateutil>=2.9.0
