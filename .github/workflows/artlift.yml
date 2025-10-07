@@ -1,20 +1,22 @@
-name: ArtLift Bot (Playwright)
+name: ArtLift Bot (Bluesky)
 
 on:
   schedule:
-    - cron: "5 5-19 * * *"   # 15/jour
+    # Matin Bruxelles ~ 07–11 -> UTC 05–09
+    - cron: "7 5,6,7,8,9 * * *"
+    # Soir Bruxelles ~ 19–22 -> UTC 17–20
+    - cron: "12 17,18,19,20 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: artlift-bot
+  group: artlift-bot-bsky
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright  # emplacement stable du cache
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -22,61 +24,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Installe d'abord Playwright (lib Python) pour lire sa version
-      - name: Install Python deps (libs)
+      - name: Install deps
         run: |
           pip install -r requirements.txt
-          python -c "import playwright; print('Playwright Py version:', playwright.__version__)"
-
-      # Cache navigateurs Playwright, clé liée à l'OS + version Playwright Python
-      - name: Get Playwright version
-        id: pwv
-        run: |
-          echo "version=$(python - <<'PY'\nimport playwright; print(playwright.__version__)\nPY)" >> $GITHUB_OUTPUT
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: pw-browsers-${{ runner.os }}-${{ steps.pwv.outputs.version }}-chromium
-          restore-keys: |
-            pw-browsers-${{ runner.os }}-${{ steps.pwv.outputs.version }}-
-            pw-browsers-${{ runner.os }}-
-
-      # Installe Chromium (si pas présent dans le cache)
-      - name: Install Playwright browsers (chromium)
-        run: |
-          python -m playwright install --with-deps chromium
-          # Sanity check: affiche les binaires présents
-          python - <<'PY'
-import os, glob
-root=os.path.expanduser('~/.cache/ms-playwright')
-print('Browsers in cache:', os.listdir(root) if os.path.isdir(root) else 'NONE')
-print('Chromium headless_shell:', glob.glob(root+'/**/chrome-linux/*headless*', recursive=True))
-PY
 
       - name: Anti-burst jitter
-        run: sleep $((RANDOM % 600))  # 0–10 min
+        run: sleep $((RANDOM % 300))  # 0–5 min
 
-      - name: Post
+      - name: Run ArtLift Bluesky
         env:
-          X_USERNAME: ${{ secrets.X_USERNAME }}
-          X_PASSWORD: ${{ secrets.X_PASSWORD }}
-          PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
-        run: python main.py
-
-      # Debug artefacts (screenshots + trace si ton script les crée)
-      - name: Upload screenshots (debug)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-screens
-          path: |
-            *.png
-
-      - name: Upload Playwright trace (debug)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-trace
-          path: trace.zip
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+          # MODE: evening_posts   # <- si tu veux forcer manuellement pendant des tests
+        run: python main_bsky.py
